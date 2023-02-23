@@ -1,0 +1,13 @@
+----------------------------------------------------------------
+Fri Nov 18 15:58:18 SGT 2022:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.14.2.0 - (1828579): instance a816c00e-0184-89be-de43-0000040e6d38 
+on database directory memory:C:\Users\melov\OneDrive - Singapore Management University\SMU General\Y3S1\DSA306 - Big Data\Project\Submission3\databaseName=metastore_db with class loader jdk.internal.loader.ClassLoaders$AppClassLoader@73d16e93 
+Loaded from file:/C:/Users/melov/AppData/Local/spark/spark-3.3.0-bin-hadoop3/jars/derby-10.14.2.0.jar
+java.vendor=Amazon.com Inc.
+java.runtime.version=17.0.4.1+9-LTS
+user.dir=C:\Users\melov\OneDrive - Singapore Management University\SMU General\Y3S1\DSA306 - Big Data\Project\Submission3
+os.name=Windows 10
+os.arch=amd64
+os.version=10.0
+derby.system.home=null
+Database Class Loader started - derby.database.classpath=''

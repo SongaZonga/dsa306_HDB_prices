@@ -1,0 +1,541 @@
+
+DSA306 Group 1 Team 5
+By: Li Song Xi (01379236), Cavin Ang Kie King (01353493), Joanna Jee Xu Hui (01394470)
+
+# Getting MRT, Schools, and Mall distance
+```{python}
+import pandas as pd
+import numpy as np
+from bs4 import BeautifulSoup
+import requests
+import lxml
+import googlemaps
+from urllib.parse import urlencode
+
+api_key = "AIzaSyAFkE53oqBILQtY3adBs9eu6fSXiAyIDlI"
+
+#Gmaps Function
+def extract_lat_lng(name):
+  endpoint = f"https://maps.googleapis.com/maps/api/geocode/json"
+  params = {'address': name, 'key':api_key}
+  url_params = urlencode(params)
+  url = f"{endpoint}?{url_params}"
+  r = requests.get(url)
+  if r.status_code not in range(200, 299):
+    return {}
+  latlng = {}
+  try:
+    latlng = r.json()['results'][0]['geometry']['location']
+  except:
+    pass
+  return latlng['lat'], latlng['lng']
+
+
+#Pri Sch Distance
+
+pri_sch_url = "https://en.wikipedia.org/wiki/List_of_primary_schools_in_Singapore"
+pri_html = requests.get(pri_sch_url, allow_redirects = True)
+pri_soup = BeautifulSoup(pri_html.text, 'html.parser')
+pri_table = pri_soup.find('table', attrs = {'class': "wikitable sortable"})
+pri_sch = pd.read_html(str(pri_table))
+pri_sch = pd.concat(pri_sch)
+
+pri_sch['Name'] = pri_sch['Name']+", Singapore"
+# pri_names = df['Name']
+pri_sch['latlng'] = pri_sch['Name'].apply(extract_lat_lng)
+
+lat_list = []
+lng_list = []
+for lat, lng in pri_sch['latlng']:
+  lat_list.append(lat)
+  lng_list.append(lng)
+pri_sch['lat'] = lat_list
+pri_sch['lng'] = lng_list
+
+pri_sch.to_csv("raw_data/pri_sch_modified.csv")
+
+
+#Sec sch Distance
+
+sec_sch_url = "https://en.wikipedia.org/wiki/List_of_secondary_schools_in_Singapore"
+sec_html = requests.get(sec_sch_url, allow_redirects = True)
+sec_soup = BeautifulSoup(sec_html.text, 'html.parser')
+sec_table = sec_soup.find('table', attrs = {'class': "wikitable sortable"})
+sec_sch = pd.read_html(str(sec_table))
+sec_sch = pd.concat(sec_sch)
+
+sec_sch['Name'] = sec_sch['Name']+", Singapore"
+sec_sch['latlng'] = sec_sch['Name'].apply(extract_lat_lng)
+
+lat_list = []
+lng_list = []
+for lat, lng in sec_sch['latlng']:
+  lat_list.append(lat)
+  lng_list.append(lng)
+sec_sch['lat'] = lat_list
+sec_sch['lng'] = lng_list
+
+sec_sch.to_csv("raw_data/sec_sch_modified.csv")
+```
+
+```{python}
+from googlemaps import *
+import pandas as pd 
+
+# API
+gmaps = Client(key = 'AIzaSyBXmbqQFtcEily7FRof-jHUkDv1nYWKIXw')
+
+addresses = pd.read_csv("raw_data/shoppingmall.csv")
+addresses.head()
+
+# Creating colummns
+addresses['lng'] = ""
+addresses['lat'] = ""
+
+for x in range(len(addresses)):
+    try:
+        geocode_result = gmaps.geocode(addresses['address'][x])
+        addresses['lat'][x] = geocode_result[0]['geometry']['location'] ['lat']
+        addresses['lng'][x] = geocode_result[0]['geometry']['location']['lng']
+    except IndexError:
+        print("Address was wrong...")
+    except Exception as e:
+        print("Unexpected error occurred.", e )
+addresses.head()
+
+# Save to csv
+addresses.to_csv('raw_data/shopping_malls_coords.csv')
+```
+
+```{r}
+library(readr)
+mrt = read.csv('raw_data/Mrt.csv')
+colnames(mrt)
+# MRT stations names
+mrt$full_name = paste(mrt$ï..mrt_station_english, mrt$mrt, mrt$stn_code)
+mrt$full_name
+mrt_list = toString(mrt$full_name)
+mrt_list
+
+# Geocode to obtain Longs & Lats
+library(ggmap)
+library(tmaptools)
+library(RCurl)
+library(jsonlite)
+library(tidyverse)
+library(leaflet)
+library(googleway)
+register_google(key = 'AIzaSyD6MHvuFCm0n9Wot8VRPuJwuVF7AkkHwas')
+mrt_list_new = unlist(strsplit(mrt_list,","))
+mrt_df <- data.frame(MRT = mrt_list_new, stringsAsFactors = FALSE)
+mrt_ggmap <- geocode(location = mrt_list_new, output = "more", source = "google")
+mrt_ggmap <- cbind(mrt_df, mrt_ggmap)
+long_lat = mrt_ggmap[, 1:3]
+long_lat |> rename('Name' = 'MRT', 'lng' = 'lon')
+
+
+long_lat1 = long_lat |> rename('Name' = 'MRT', 'lng' = 'lon')
+which(is.na(long_lat1$lng))
+long_lat1$Name[63]
+long_lat1$lng[63] = 103.8215381  
+long_lat1$lat[63] = 1.2650372
+long_lat1$Name[149]
+long_lat1$lng[149] = 103.7666228  
+long_lat1$lat[149] = 1.377783623
+#manually enter long-lat data as previous function could not find
+
+# Write to csv to update NA values with proper coords
+write.csv(long_lat1,"raw_data/mrt_lng_lat.csv", row.names = FALSE)
+```
+
+
+```{python}
+import pandas as pd
+import haversine as hs
+
+
+def add_to_main(main_df, dist_df, ver):
+  """Uses min_dist function to find each addresses closest location within dist_df to each address in main_df"""
+  sch_list = []
+  dist_list = []
+  for index, row in main_df.iterrows():
+    x = min_dist(row['latitude'], row['longitude'], dist_df = dist_df)
+    sch_list.append(x[0])
+    dist_list.append(x[1])
+  main_df[f'closest_{ver}'] = sch_list
+  main_df[f'{ver}_dist'] = dist_list
+
+def min_dist(lat, lng, dist_df):
+  """Uses hs.haversine to calculate distance from each location based on lat/lng and returns closeset address and its distance"""
+  dist = []
+  for index, row in dist_df.iterrows():
+    dist.append(hs.haversine((lat, lng), (row['lat'], row['lng'])))
+  pos = dist.index(min(dist))
+  return dist_df.iloc[pos]['Name'], min(dist)
+```
+
+```{python}  
+pri_sch_df = pd.read_csv("raw_data/pri_sch_modified.csv")[['Name', 'lat', 'lng']]
+sec_sch_df = pd.read_csv("raw_data/sec_sch_modified.csv")[['Name', 'lat', 'lng']]
+mall_df = pd.read_csv("raw_data/shopping_malls_coords.csv")[['Name', 'lat', 'lng']]
+mrt_df = pd.read_csv("raw_data/mrt_lng_lat.csv")[['Name', 'lat', 'lng']]
+
+mall_df.head()
+
+hdb_df_full = pd.read_csv("raw_data/ALL Prices 1990-2021 mar.csv")
+u_loc_full = hdb_df_full.drop_duplicates(['address'])[['address', 'latitude', 'longitude']]
+
+```
+
+Adding all to main data frame and saving as csv
+```{python}
+add_to_main(u_loc_full, dist_df = pri_sch_df, ver = "pri")
+add_to_main(u_loc_full, dist_df = sec_sch_df, ver = "sec")
+add_to_main(u_loc_full, dist_df = mall_df, ver = "mall")
+add_to_main(u_loc_full, dist_df = mrt_df, ver = "mrt")
+
+u_loc_full.head()
+u_loc_full.to_csv('raw_data/distance_to_all.csv')
+```
+
+Now we have the distance for all locations!
+
+
+#Cleaning with the data!!!
+
+```{r}
+library(sparklyr)
+library(dplyr)
+
+config <- spark_config()
+config$`sparklyr.shell.driver-memory` <- "6G"
+config$`sparklyr.shell.executor-memory` <- "6G"
+sc <- spark_connect(master = "local", config = config, version = "3.3.0")
+
+# sc <- spark_connect(master = "local", version = "3.3.0")
+hdb <- spark_read_csv(sc, name = 'hdb_data', path = "raw_data/ALL Prices 1990-2021 mar.csv", header =TRUE, delimiter = ',', memory = FALSE)
+distance <- spark_read_csv(sc, name = 'distance_data', path = "raw_data/distance_to_all.csv", header =TRUE, delimiter = ',', memory = FALSE)
+
+library(DBI)
+library(dbplot)
+library(ggplot2)
+library(gridExtra)
+
+merged_data <- inner_join(hdb, distance, by = 'address') 
+```
+
+
+Rows that are removed from the data-set
+```{r}
+truncated_data <- select(merged_data, - c('month', 'town_dummy', 'block', 'address', 'street_name', 'latitude_x', 'longitude_y', 'storey_range', 18:28, '_c0', 'latitude_y', 'longitude_x', 'closest_mrt', 'closest_mall', 'closest_pri', 'closest_sec', 'flat_model' ))
+
+# EDA
+# Check for NAs
+hdb_tbl <- copy_to(sc, truncated_data, overwrite = TRUE)
+sum(is.na(hdb_tbl))
+data_cleaned <- hdb_tbl #|> mutate(flat_type = as.numeric(substr(flat_type, 1,2)))
+head(data_cleaned)
+
+columns <- colnames(data_cleaned)
+columns
+
+for (i in columns){
+  data_cleaned[[i]] = as.double(data_cleaned[[i]])
+}
+data <- as.data.frame(data_cleaned)
+data <- data |>
+  filter(year>=2017)
+data <- sdf_copy_to(sc, data, overwrite = TRUE)
+spark_write_parquet(data, path = "data/combined_data.parquet")
+data <- spark_read_parquet(sc, path = "data/combined_data.parquet")
+```
+data cleaned!
+
+##EDA
+#Correlation plot
+```{r}
+library(corrr)
+data_cor  <- select(data, -c(flat_type, town)) 
+data_cor
+#remove flat type from corelation plot as its categorical
+# cor(data_cor, use = "complete.obs")
+data_cor |> 
+  correlate(use = "pairwise.complete.obs", method = "pearson") |> 
+  shave(upper = TRUE) |> 
+  rplot(colours = c("indianred2", "black", "skyblue1"))
+```
+
+#Checking spread of each variable
+```{r}
+library(ggplot2)
+library(gridExtra)
+q <- c(0.25, 0.5, 0.75)
+      
+# Resale
+ggplot(data = data, aes(x = resale_price, y = 1)) +
+geom_violin(draw_quantiles = q)
+# positive skew for resale price -> log
+violin_resale_price <- ggplot(data = data, aes(x = log(resale_price), y = 1)) +
+  geom_violin(draw_quantiles = q)
+violin_resale_price
+      
+# area_sqm
+violin_area_sqm <- ggplot(data = data, aes(x = area_sqm, y = 1)) +
+  geom_violin(draw_quantiles = q)
+violin_area_sqm
+
+# lease_rem
+violin_lease_rem <- ggplot(data = data, aes(x = lease_rem, y = 1)) +
+  geom_violin(draw_quantiles = q) 
+violin_lease_rem
+#most people sell when theres more lease remaining may want to take out lease_start
+      
+# pri_dist
+ggplot(data = data, aes(x = pri_dist, y = 1)) +
+  geom_violin(draw_quantiles = q)
+# positive skew for pri_dist -> log
+violin_pri_dist <- ggplot(data = data, aes(x = log(pri_dist), y = 1)) +
+  geom_violin(draw_quantiles = q) 
+violin_pri_dist
+
+# sec_dist
+ggplot(data = data, aes(x = sec_dist, y = 1)) +
+  geom_violin(draw_quantiles = q)
+# positive skew for sec_dist -> log
+violin_sec_dist <- ggplot(data = data, aes(x = log(sec_dist), y = 1)) +
+  geom_violin(draw_quantiles = q) 
+violin_sec_dist 
+      
+# mall_dist
+ggplot(data = data, aes(x = mall_dist, y = 1)) +
+  geom_violin(draw_quantiles = q)
+# positive skew for mall_dist -> sqrt
+violin_mall_dist <- ggplot(data = data, aes(x = sqrt(mall_dist), y = 1)) +
+  geom_violin(draw_quantiles = q)
+violin_mall_dist 
+      
+      # mrt_dist
+ggplot(data = data, aes(x = mrt_dist, y = 1)) +
+  geom_violin(draw_quantiles = q)
+# positive skew for mrt_dist -> log
+violin_mrt_dist <- ggplot(data = data, aes(x = log(mrt_dist), y = 1)) +
+  geom_violin(draw_quantiles = q)
+violin_mrt_dist
+```
+
+#Ploting each variable against resale_price
+```{r}
+library(ggplot2)
+# 1. year 
+#ggplot(data=data, aes(x=year, y=resale_price)) + geom_point() # Use raster plot inside
+year <- data |> 
+  group_by(year) |> 
+  summarise(avg_resale_price = mean(resale_price))
+ggplot(data=year, aes(x=year, y=avg_resale_price)) + geom_line()
+# Positive relationship between year and resale price
+    
+# 2. 
+no_rooms <- table(data$flat_type)
+# freq_rooms <- as.data.frame(freq)
+# freq_rooms
+rooms <- data |> group_by(flat_type) |> summarise(avg_resale_price = mean(resale_price))
+ggplot(data=rooms, aes(x=flat_type, y=avg_resale_price)) + geom_point()
+# Strong Positive relationship between year and resale price
+
+# 3.
+storey <- data |> group_by(storey) |> summarise(avg_resale_price = mean(resale_price))
+ggplot(data=storey, aes(x=storey, y=avg_resale_price)) + geom_point()
+# Strong Positive relationship between storey and resale price
+      
+# 4.
+lease_rem <- data |> group_by(lease_rem) |> summarise(avg_resale_price = mean(resale_price))
+ggplot(data=lease_rem, aes(x=lease_rem, y=avg_resale_price)) + geom_point()
+# No clear relationship between lease remaining and resale price
+      
+# 5. 
+pri_dist <- data |> group_by(pri_dist) |> summarise(avg_resale_price = mean(resale_price)) |> filter(pri_dist<2)
+ggplot(data=pri_dist, aes(x=pri_dist, y=avg_resale_price)) + geom_point()
+# No clear relationship between pri sch distance and resale price
+      
+# 6.
+sec_dist <- data |> group_by(sec_dist) |> summarise(avg_resale_price = mean(resale_price)) |> filter(sec_dist<2)
+ggplot(data=sec_dist, aes(x=sec_dist, y=avg_resale_price)) + geom_point()
+# No clear relationship between sec sch distance and resale price 
+      
+# 7.
+mall_dist <- data |> group_by(mall_dist) |> summarise(avg_resale_price = mean(resale_price)) |> filter(mall_dist<2)
+ggplot(data=mall_dist, aes(x=mall_dist, y=avg_resale_price)) + geom_point()
+# Weak positive relationship between sec sch distance and resale price on prices > 500,000
+      
+# 8.
+mrt_dist <- data |> group_by(mrt_dist) |> summarise(avg_resale_price = mean(resale_price)) |> filter(mrt_dist<2)
+ggplot(data=mrt_dist, aes(x=mrt_dist, y=avg_resale_price)) + geom_point()
+# Weak positive relationship between mrt distance and resale price on prices > 500,000
+```
+
+
+
+#Checking significance of dummy variables
+```{r}
+CI <- 1.96 #at a 95% confidence leve
+
+dummy_town <- data |>
+  group_by(town) |>
+  summarise(count = n(), avg_resale_price = mean(resale_price), sd = sd(resale_price)) |>
+  mutate(se = sd/sqrt(count)) |>
+  collect()
+
+dummy_town |>
+  ggplot(aes(x = town, y = avg_resale_price)) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = avg_resale_price-CI*se, ymax = avg_resale_price+CI*se),
+    width = 0.1
+  ) + geom_hline(
+    yintercept = mean(dummy_town$avg_resale_price),
+    linetype= "dashed"
+  )
+
+
+dummy_flat <- data |>
+  group_by(flat_type) |>
+  summarise(count = n(), avg_resale_price = mean(resale_price), sd = sd(resale_price)) |>
+  mutate(se = sd/sqrt(count)) |>
+  collect()
+
+dummy_flat |>
+  ggplot(aes(x = flat_type, y = avg_resale_price)) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = avg_resale_price-CI*se, ymax = avg_resale_price+CI*se),
+    width = 0.1
+  ) + geom_hline(
+    yintercept = mean(dummy_flat$avg_resale_price),
+    linetype= "dashed"
+  )
+
+```
+#Testing Different Models
+##Spliting the Data
+```{r}
+data_split <- data |>
+  sdf_random_split(training = 0.8, test = 0.2, seed = 1337)
+
+split_train <- data_split$training
+split_test <- data_split$test
+```
+
+```{r}
+
+fit1 <- split_train |> ml_linear_regression(formula = resale_price ~ .)
+summary(fit1)
+fit1_sum <- ml_evaluate(fit1, dataset = split_test)
+fit1_sum$root_mean_squared_error
+fit1_sum$r2adj
+# R squared value of 0.8634
+```
+# Transforming then Spliting 
+Previously we had seen that some colums were positively skewed. Here we try to transform the data before putting it into the model
+```{r}
+split_trans_train <- split_train |>
+  mutate(resale_price_lg = log(resale_price),
+         pri_dist_lg = log(pri_dist),
+         sec_dist_lg = log(sec_dist),
+         mall_dist_sqrt = sqrt(mall_dist),
+         mrt_dist_lg = log(mrt_dist)) |>
+  select(-c(resale_price, pri_dist, sec_dist, mall_dist, mrt_dist))
+split_trans_test <- split_test |>
+  mutate(resale_price_lg = log(resale_price),
+         pri_dist_lg = log(pri_dist),
+         sec_dist_lg = log(sec_dist),
+         mall_dist_sqrt = sqrt(mall_dist),
+         mrt_dist_lg = log(mrt_dist)) |>
+  select(-c(resale_price, pri_dist, sec_dist, mall_dist, mrt_dist))
+```
+
+fit2
+```{r}
+fit2 <- split_trans_train |> ml_linear_regression(formula = resale_price_lg~.)
+summary(fit2)
+
+fit2_sum <- ml_evaluate(fit2, split_trans_test)
+fit2_sum$root_mean_squared_error
+fit2_sum$r2adj
+# R squared value of 0.893
+```
+
+fit3
+```{r}
+fit3 <- split_trans_train |> ml_linear_regression(formula = resale_price_lg~ town + year + flat_type + storey + area_sqm + lease_start + lease_rem+sec_dist_lg + pri_dist_lg + mall_dist_sqrt + mrt_dist_lg + flat_type*area_sqm + lease_start*lease_rem)
+summary(fit3)
+
+fit3_sum <- ml_evaluate(fit3, split_trans_test)
+fit3_sum$root_mean_squared_error
+fit3_sum$r2adj
+# R squared value of 0.8967 after including interaction terms between lease_start, lease_rem and area_sqm, flat_type
+```
+
+#Pipeline
+```{r}
+sql <- 
+  "
+  SELECT 
+    year, storey, area_sqm, lease_start, lease_rem, LOG(resale_price) as resale_price_lg, LOG(pri_dist) as pri_dist_lg, LOG(sec_dist) as sec_dist_lg, SQRT(mall_dist) as mall_dist_sqrt, LOG(mrt_dist) as mrt_dist_lg, town, flat_type
+  FROM __THIS__
+  "
+
+pipeline <- ml_pipeline(sc)|>
+  ft_sql_transformer(statement = sql) |>
+  ft_r_formula(formula = resale_price_lg ~ town + year + flat_type + storey + area_sqm + lease_start + lease_rem + sec_dist_lg + pri_dist_lg + mall_dist_sqrt + mrt_dist_lg + flat_type*area_sqm + lease_start*lease_rem) |>
+  ml_linear_regression()
+# pipeline
+# split_trans_train
+  
+pipeline_model  <- ml_fit(pipeline, split_train)
+cv <- ml_cross_validator(
+  sc,
+  estimator = pipeline,
+  estimator_param_maps = list(
+    linear_regression = list(
+      elastic_net_param = c(0, 0.25, 0.5, 0.75, 1), #c(0, 0.25, 0.75, 1)
+      reg_param = seq(from = 0, to = 0.001, length.out = 50)#seq(from = 0.001, to = 1, length.out = 101)
+    )
+  ),
+  evaluator = ml_regression_evaluator(
+    sc,
+    label_col = "resale_price_lg"
+  ),
+  num_folds = 10,
+  parallelism = 10,
+  seed = 1337
+)
+cv_model <- ml_fit(cv, split_train)
+cv_model
+
+cv_mod_eval <- ml_validation_metrics(cv_model)
+cv_mod_eval |> arrange(rmse)
+cv_model$best_model
+
+```
+
+#Saving pipeline and model
+```{r}
+ml_save(pipeline, path = "spark_pipeline", overwrite = TRUE)
+ml_save(cv_model$best_model, path = "hdb_cv_model", overwrite = TRUE)
+```
+```{r}
+library(plumber)
+
+plumb(file = "hdb_plumber.R") |>
+  pr_run(port = 8000)
+
+```
+
+#Disconnect From Spark
+```{r}
+spark_disconnect(sc)
+```
+```{r}
+toString(12)
+```
+
